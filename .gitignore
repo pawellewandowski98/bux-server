@@ -35,3 +35,6 @@ coverage.txt
 
 # Development data dir
 data/
+
+# Config files
+.env.config
