@@ -1,3 +1,4 @@
+# !NOTE: This file should be used only by start-bux-server.sh
 version: "3.9"
 
 services:

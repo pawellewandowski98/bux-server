@@ -3,7 +3,7 @@
 reset='\033[0m'
 
 # Welcome message
-echo -e "\033[0;33m\033[1mWelcome in Bux Server configurator!$reset"
+echo -e "\033[0;33m\033[1mWelcome in Bux Server!$reset"
 
 while [[ $# -gt 0 ]]; do
     key="$1"
@@ -29,10 +29,18 @@ while [[ $# -gt 0 ]]; do
         background="$2"
         shift
         ;;
+        -x|--xpub)
+        admin_xpub="$2"
+        shift
+        ;;
+        -l|--load)
+        load_config="true"
+        shift
+        ;;
         -h|--help)
-        echo -e "\033[1mUsage: ./configurator.sh [OPTIONS]$reset"
+        echo -e "\033[1mUsage: ./start-bux-server.sh [OPTIONS]$reset"
         echo ""
-        echo "Bux configurator helps you to run Bux server with your preferred database and cache storage."
+        echo "This script helps you to run Bux server with your preferred database and cache storage."
         echo ""
         echo -e "Options:$reset"
         echo -e "  -db,  --database\t Define database - postgresql, mongodb, sqlite$reset"
@@ -40,6 +48,8 @@ while [[ $# -gt 0 ]]; do
         echo -e "  -bs,  --bux-server\t Whether the bux-server should be run - true/false$reset"
         echo -e "  -env, --environment\t Define bux-server environment - development/staging/production$reset"
         echo -e "  -b,   --background\t Whether the bux-server should be run in background - true/false$reset"
+        echo -e "  -x,   --xpub\t\t Define admin xPub$reset"
+        echo -e "  -l,   --load\t\t Load .env.config file and run bux-server with its settings$reset"
         exit 1;
         shift
         ;;
@@ -49,6 +59,40 @@ while [[ $# -gt 0 ]]; do
     shift
 done
 
+if [ "$load_config" == "true" ]; then
+    if [ -f .env.config ]; then
+        echo "File .env.config exists."
+
+            while IFS= read -r line; do
+                if [[ "$line" =~ ^(BUX_DATASTORE__ENGINE=) ]]; then
+                    value="${line#*=}"
+                    database="${value//\"}"
+                fi
+                if [[ "$line" =~ ^(BUX_CACHE__ENGINE=) ]]; then
+                    value="${line#*=}"
+                    cache="${value//\"}"
+                fi
+                if [[ "$line" =~ ^(RUN_BUX_SERVER=) ]]; then
+                    value="${line#*=}"
+                    bux_server="${value//\"}"
+                fi
+                if [[ "$line" =~ ^(BUX_ENVIRONMENT=) ]]; then
+                    value="${line#*=}"
+                    environment="${value//\"}"
+                fi
+                if [[ "$line" =~ ^(RUN_BUX_SERVER_BACKGROUND=) ]]; then
+                    value="${line#*=}"
+                    background="${value//\"}"
+                fi
+                if [[ "$line" =~ ^(BUX_AUTHENTICATION__ADMIN_KEY=) ]]; then
+                    value="${line#*=}"
+                    admin_xpub="${value//\"}"
+                fi
+            done < ".env.config"
+        else
+            echo "File .env.config does not exist."
+        fi
+fi
 
 if [ "$database" == "" ]; then
     # Ask for database choice
@@ -84,6 +128,7 @@ if [ "$cache" == "" ]; then
     esac
 fi
 
+if [ "$load_config" != "true" ]; then
 # Create the .env.config file
 echo -e "\033[0;32mCreating .env.config file...$reset"
 cat << EOF > .env.config
@@ -106,10 +151,12 @@ if [ "$cache" == "redis" ]; then
     echo 'BUX_REDIS__URL="redis://redis:6379"' >> .env.config
 fi
 
+fi
+
 echo -e "\033[0;32mStarting additional services with docker-compose...$reset"
 if [ "$cache" == "redis" ]; then
     echo -e "\033[0;37mdocker compose up -d bux-redis bux-'$database'$reset"
-     docker compose up -d bux-redis bux-"$database"
+    docker compose up -d bux-redis bux-"$database"
 else
     echo -e "\033[0;37mdocker compose up -d bux-'$database'$reset"
     docker compose up -d bux-"$database"
@@ -131,6 +178,10 @@ if [ "$bux_server" == "" ]; then
     esac
 fi
 
+if [ "$load_config" != "true" ]; then
+    echo "RUN_BUX_SERVER=\"$bux_server\"" >> .env.config
+fi
+
 if [ "$bux_server" == "true" ]; then
     if [ "$environment" == "" ]; then
         # Ask for environment choice
@@ -150,11 +201,21 @@ if [ "$bux_server" == "true" ]; then
         esac
     fi
 
-    echo "BUX_ENVIRONMENT='$environment'" >> .env.config
+
+    if [ "$admin_xpub" == "" ]; then
+        # Ask for admin xPub choice
+        echo -e "\033[1mDefine admin xPub $reset"
+        echo -e "\033[4mLeave empty to use the one from selected environment config file $reset"
+        read -p "> " admin_input
+
+        if [[ -n "$admin_input" ]]; then
+            admin_xpub=$admin_input
+        fi
+    fi
 
     if [ "$background" == "" ]; then
         # Ask for background choice
-        echo -e "\033[1mDo you want ot run Bux-server in background? $reset"
+        echo -e "\033[1mDo you want to run Bux-server in background? $reset"
         echo "1. YES"
         echo "2. NO"
         echo -e "\033[4mAny other number ends the program $reset"
@@ -166,6 +227,16 @@ if [ "$bux_server" == "true" ]; then
             2) background="false";;
             *) echo -e "\033[0;31mExiting program... Stopping additional services... $reset"; docker compose stop; exit 1;;
         esac
+    fi
+
+
+    if [ "$load_config" != "true" ]; then
+        echo "BUX_ENVIRONMENT=\"$environment\"" >> .env.config
+        echo "RUN_BUX_SERVER_BACKGROUND=\"$background\"" >> .env.config
+
+        if [ "$admin_xpub" != "" ]; then
+            echo "BUX_AUTHENTICATION__ADMIN_KEY=\"$admin_xpub\"" >> .env.config
+        fi
     fi
 
     echo -e "\033[0;32mRunning Bux-server...$reset"
